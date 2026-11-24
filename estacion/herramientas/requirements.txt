@@ -1,0 +1,8 @@
+# herramienta_apriltag.py
+# En la Jetson del JetCobot OpenCV suele venir con JetPack: instala solo lo que falte.
+opencv-python>=4.8   # >=4.7 trae cv2.aruco con los diccionarios AprilTag
+numpy
+pupil-apriltags
+
+# solo para las pruebas
+pytest

@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Race Control</title>
+<style>
+  :root { --bg:#fff; --fg:#14161a; --muted:#6b7280; --line:#e5e7eb; --card:#f6f7f9;
+          --ok:#15803d; --warn:#b45309; --bad:#b91c1c; --accent:#1d4ed8; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#101215; --fg:#eceff3; --muted:#9aa3af; --line:#2a2f37; --card:#181b20;
+            --ok:#4ade80; --warn:#fbbf24; --bad:#f87171; --accent:#60a5fa; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:15px/1.4 system-ui, sans-serif; padding:16px; max-width:1100px; margin-inline:auto; }
+  header { display:flex; flex-wrap:wrap; gap:12px 24px; align-items:baseline; margin-bottom:16px; }
+  h1 { font-size:20px; margin:0; }
+  .fase { font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+  .fase.carrera { color:var(--ok); } .fase.roja { color:var(--bad); }
+  .fase.calentamiento { color:var(--warn); }
+  .reloj { font-variant-numeric:tabular-nums; font-size:28px; font-weight:700; }
+  .conexion { margin-left:auto; color:var(--muted); font-size:13px; }
+  .conexion.mal { color:var(--bad); }
+  section { background:var(--card); border:1px solid var(--line); border-radius:8px;
+            padding:12px 14px; margin-bottom:14px; }
+  h2 { font-size:13px; margin:0 0 8px; color:var(--muted); text-transform:uppercase;
+       letter-spacing:.05em; }
+  table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+  th, td { text-align:right; padding:6px 8px; border-bottom:1px solid var(--line); }
+  th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align:left; }
+  tr.no-elegible { color:var(--muted); }
+  .controles { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  button { font:inherit; padding:8px 14px; border-radius:6px; border:1px solid var(--line);
+           background:var(--bg); color:var(--fg); cursor:pointer; min-height:40px; }
+  button:hover { border-color:var(--accent); }
+  button.rojo { color:var(--bad); border-color:var(--bad); }
+  button.verde { color:var(--ok); border-color:var(--ok); }
+  input, select { font:inherit; padding:7px 8px; border-radius:6px; border:1px solid var(--line);
+                  background:var(--bg); color:var(--fg); min-height:40px; }
+  input[type=number] { width:90px; } input.equipos { width:170px; }
+  label.chk { display:flex; gap:6px; align-items:center; }
+  ul { margin:0; padding-left:18px; } li { margin:2px 0; }
+  .vacio { color:var(--muted); }
+  #msg { min-height:20px; color:var(--warn); margin:0 0 10px; }
+  .offline { color:var(--bad); font-weight:600; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Race Control</h1>
+  <span id="tanda" class="vacio">sin tanda</span>
+  <span id="fase" class="fase"></span>
+  <span id="reloj" class="reloj"></span>
+  <span id="conexion" class="conexion">conectando…</span>
+</header>
+
+<p id="msg" role="status"></p>
+
+<section>
+  <h2>Ranking</h2>
+  <table>
+    <thead><tr><th>Pos</th><th>Equipo</th><th>Interv.</th><th>Vueltas</th>
+      <th>T. medio</th><th>Error pose</th></tr></thead>
+    <tbody id="ranking"><tr><td colspan="6" class="vacio">Sin datos</td></tr></tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Controles del juez</h2>
+  <div class="controles">
+    <input id="equipos" class="equipos" placeholder="equipos: 1 2 3" aria-label="Equipos">
+    <label class="chk"><input id="calent" type="checkbox" checked> calentamiento</label>
+    <button id="b-tanda">Crear tanda</button>
+    <button id="b-carrera" class="verde">Iniciar carrera</button>
+    <button id="b-roja" class="rojo">Bandera roja</button>
+    <button id="b-verde" class="verde">Bandera verde</button>
+    <button id="b-fin">Terminar</button>
+  </div>
+  <div class="controles" style="margin-top:10px">
+    <input id="i-equipo" type="number" min="1" placeholder="equipo" aria-label="Equipo">
+    <select id="i-tipo" aria-label="Tipo">
+      <option>fisica</option><option>web</option><option>teleoperacion</option><option>software</option>
+    </select>
+    <label class="chk"><input id="i-decl" type="checkbox"> la declaró el equipo</label>
+    <button id="b-int">Registrar intervención</button>
+  </div>
+  <div class="controles" style="margin-top:10px">
+    <input id="token" type="password" placeholder="token (si hace falta)" aria-label="Token">
+  </div>
+</section>
+
+<section>
+  <h2>Avisos</h2>
+  <ul id="avisos"><li class="vacio">Ninguno</li></ul>
+  <p id="offline" class="offline"></p>
+</section>
+
+<section>
+  <h2>Mensajes descartados</h2>
+  <div id="metricas" class="vacio"></div>
+</section>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmt = (n, d = 1) => n == null ? "–" : n.toFixed(d);
+let tokenGuardado = "";
+try { tokenGuardado = localStorage.getItem("granprix-token") || ""; } catch (e) {}
+$("token").value = tokenGuardado;
+$("token").addEventListener("change", () => {
+  try { localStorage.setItem("granprix-token", $("token").value); } catch (e) {}
+});
+
+function texto(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+
+function pintar(s) {
+  $("tanda").textContent = s.tanda || "sin tanda";
+  $("fase").textContent = s.fase || "";
+  $("fase").className = "fase " + (s.fase || "");
+  const t = Math.min(s.t_carrera, s.duracion_max);
+  $("reloj").textContent = s.tanda
+    ? `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")} / ${s.duracion_max / 60}:00` : "";
+
+  $("ranking").innerHTML = s.ranking.length ? s.ranking.map(r =>
+    `<tr class="${r.elegible ? "" : "no-elegible"}"><td>${r.posicion ?? "–"}</td>
+     <td>Equipo ${String(r.equipo).padStart(2, "0")}${r.elegible ? "" : " (no elegible)"}</td>
+     <td>${r.intervenciones}</td><td>${r.vueltas_validas}</td>
+     <td>${r.tiempo_medio == null ? "–" : fmt(r.tiempo_medio) + " s"}</td>
+     <td>${r.error_pose == null ? "–" : fmt(r.error_pose * 1000, 0) + " mm"}</td></tr>`).join("")
+    : '<tr><td colspan="6" class="vacio">Sin datos</td></tr>';
+
+  $("avisos").innerHTML = s.avisos.length
+    ? s.avisos.slice().reverse().map(a => `<li>${texto(a)}</li>`).join("")
+    : '<li class="vacio">Ninguno</li>';
+  $("offline").textContent = s.offline.length ? "OFFLINE: " + s.offline.join(", ") : "";
+
+  const m = s.metricas;
+  const canales = Object.entries(m.invalidos_por_canal).map(([k, v]) => `${k}: ${v}`);
+  const motivos = Object.entries(m.descartados).map(([k, v]) => `${k}: ${v}`);
+  $("metricas").textContent = `${m.recibidos} recibidos · ${m.invalidos} inválidos`
+    + (canales.length ? ` (${canales.join(", ")})` : "")
+    + (motivos.length ? ` · descartados: ${motivos.join(", ")}` : "");
+}
+
+async function accion(ruta, cuerpo) {
+  $("msg").textContent = "";
+  const cabeceras = { "Content-Type": "application/json" };
+  if ($("token").value) cabeceras["X-Token"] = $("token").value;
+  try {
+    const r = await fetch(ruta, { method: "POST", headers: cabeceras,
+                                  body: cuerpo ? JSON.stringify(cuerpo) : undefined });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      $("msg").textContent = typeof e.detail === "string" ? e.detail : `error ${r.status}`;
+    }
+  } catch (e) { $("msg").textContent = "sin conexión con Race Control"; }
+}
+
+$("b-tanda").onclick = () => accion("/api/tanda", {
+  equipos: $("equipos").value.split(/[\s,]+/).filter(Boolean).map(Number),
+  con_calentamiento: $("calent").checked });
+$("b-carrera").onclick = () => accion("/api/carrera");
+$("b-roja").onclick = () => accion("/api/bandera/roja");
+$("b-verde").onclick = () => accion("/api/bandera/verde");
+$("b-fin").onclick = () => { if (confirm("¿Terminar la tanda?")) accion("/api/fin"); };
+$("b-int").onclick = () => accion("/api/intervencion", {
+  equipo: Number($("i-equipo").value), tipo: $("i-tipo").value, declarada: $("i-decl").checked });
+
+function conectar() {
+  const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
+  ws.onopen = () => { $("conexion").textContent = "en vivo"; $("conexion").className = "conexion"; };
+  ws.onmessage = e => pintar(JSON.parse(e.data));
+  ws.onclose = () => {
+    $("conexion").textContent = "desconectado, reintentando…"; $("conexion").className = "conexion mal";
+    setTimeout(conectar, 2000);
+  };
+}
+conectar();
+</script>
+</body>
+</html>
